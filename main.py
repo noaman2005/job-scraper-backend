@@ -86,9 +86,8 @@ async def scrape_jobs(payload: dict):
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-setuid-sandbox")
     chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--blink-settings=imagesEnabled=false")
     chrome_options.add_argument("--log-level=3")
     chrome_options.add_argument(
@@ -96,11 +95,8 @@ async def scrape_jobs(payload: dict):
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     )
-    # ADD THIS LINE for Docker:
-    chrome_options.binary_location = "/usr/bin/chromium"
 
     driver = webdriver.Chrome(options=chrome_options)
-
 
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
     "source": """

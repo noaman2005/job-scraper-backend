@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: job-scraper-backend
-    runtime: docker
-    region: oregon
-    plan: free
-    healthCheckPath: /docs
