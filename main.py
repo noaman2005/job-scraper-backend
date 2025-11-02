@@ -23,7 +23,8 @@ IT_KEYWORDS = [
 # Allow local frontend to connect
 origins = [
     "http://localhost:3000",
-    "http://localhost:5173"  # React dev server origin
+    "http://localhost:5173",
+    "https://job-scraper-backend-kj3o.onrender.com/"  # React dev server origin
     # add other origins if needed
 ]
 
