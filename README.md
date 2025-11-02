@@ -90,29 +90,6 @@ Response:
 }
 ```
 
-## 🧪 Quick Test
-
-```bash
-# Terminal 1: Start backend
-uvicorn main:app --reload --port 8000
-
-# Terminal 2: Test with curl
-curl -X POST http://localhost:8000/extract_keywords -F "file=@resume.pdf"
-```
-
-Check backend terminal for scraping logs showing job extraction details.
-
-## 📝 Environment Variables
-
-None required for local development - just run and go!
-
-## 📂 Project Files
-
-```
-backend/
-├── main.py              # FastAPI application
-├── requirements.txt     # Python dependencies
-└── README.md           # This file
 ```
 
 ## 🤝 Dependencies
