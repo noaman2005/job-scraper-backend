@@ -86,8 +86,9 @@ async def scrape_jobs(payload: dict):
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-setuid-sandbox")
+    chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--blink-settings=imagesEnabled=false")
     chrome_options.add_argument("--log-level=3")
     chrome_options.add_argument(
@@ -95,9 +96,11 @@ async def scrape_jobs(payload: dict):
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     )
-
+    # ADD THIS LINE for Docker:
+    chrome_options.binary_location = "/usr/bin/chromium"
 
     driver = webdriver.Chrome(options=chrome_options)
+
 
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
     "source": """
@@ -112,28 +115,69 @@ async def scrape_jobs(payload: dict):
     try:
         for keyword in keywords:
             search_url = f"https://www.indeed.com/jobs?q={keyword}&l={location.replace(' ', '+')}"
+            print(f"\n🔍 Searching: {search_url}")
             driver.get(search_url)
             time.sleep(5)
 
-            last_height = driver.execute_script("return document.body.scrollHeight")
-            for _ in range(3):
-                driver.find_element(By.TAG_NAME, "body").send_keys(Keys.END)
-                time.sleep(3)
-                new_height = driver.execute_script("return document.body.scrollHeight")
-                if new_height == last_height:
-                    break
-                last_height = new_height
+            page_source = driver.page_source
+            print(f"Page loaded, length: {len(page_source)} bytes")
 
-            jobs = driver.find_elements(By.CSS_SELECTOR, "a.jcs-JobTitle")
-            companies = driver.find_elements(By.CSS_SELECTOR, "span.companyName")
+            # NEW SELECTORS - Updated for current Indeed structure
+            try:
+                jobs = driver.find_elements(By.CSS_SELECTOR, "a.jcs-JobTitle")
+                if len(jobs) > 0:
+                    print(f"Found {len(jobs)} jobs with 'a.jcs-JobTitle'")
+            except:
+                jobs = []
 
+            # If first selector fails, try alternative
+            if len(jobs) == 0:
+                try:
+                    jobs = driver.find_elements(By.CSS_SELECTOR, "h2.jobTitle a")
+                    print(f"Trying 'h2.jobTitle a', found {len(jobs)} jobs")
+                except:
+                    jobs = []
+
+            # If still nothing, try data attributes
+            if len(jobs) == 0:
+                try:
+                    jobs = driver.find_elements(By.CSS_SELECTOR, "a[data-jk]")
+                    print(f"Trying 'a[data-jk]', found {len(jobs)} jobs")
+                except:
+                    jobs = []
+
+            # Find company names with flexible selectors
+            try:
+                companies = driver.find_elements(By.CSS_SELECTOR, "span.companyName")
+                print(f"Found {len(companies)} companies")
+            except:
+                companies = []
+
+            # Extract job data
             for i in range(len(jobs)):
-                title = jobs[i].text.strip()
-                link = jobs[i].get_attribute("href")
-                company = companies[i].text.strip() if i < len(companies) else "N/A"
-                if title and link:
-                    all_jobs.append({"title": title, "company": company, "link": link})
+                try:
+                    title = jobs[i].text.strip()
+                    link = jobs[i].get_attribute("href")
+                    
+                    # Handle relative URLs
+                    if link and not link.startswith("http"):
+                        link = "https://www.indeed.com" + link
+                    
+                    company = companies[i].text.strip() if i < len(companies) else "N/A"
+                    
+                    if title and link:
+                        all_jobs.append({"title": title, "company": company, "link": link})
+                        print(f"  ✅ {title} — {company}")
+                except Exception as e:
+                    print(f"  ⚠️ Error extracting job {i}: {str(e)}")
+
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
     finally:
         driver.quit()
 
+    print(f"\n📊 Total jobs found: {len(all_jobs)}")
     return {"jobs": all_jobs}
