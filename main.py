@@ -24,17 +24,17 @@ IT_KEYWORDS = [
 origins = [
     "http://localhost:3000",
     "http://localhost:5173",
-    "https://job-scraper-backend-kj3o.onrender.com/"  # React dev server origin
-    # add other origins if needed
+    "https://ai-job-scraper.netlify.app",
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 def extract_text_from_pdf(file_path):
