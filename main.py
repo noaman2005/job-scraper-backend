@@ -1,13 +1,14 @@
+# main.py
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from PyPDF2 import PdfReader
 import re
 import tempfile
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
-import time
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
+
+# Import scrapers
+from scrapers import IndeedScraper, NaukriScraper, LinkedInScraper
 
 app = FastAPI()
 
@@ -20,7 +21,6 @@ IT_KEYWORDS = [
     "agile", "scrum", "testing"
 ]
 
-# Allow local frontend to connect
 origins = [
     "http://localhost:3000",
     "http://localhost:5173",
@@ -35,19 +35,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-
 def extract_text_from_pdf(file_path):
     reader = PdfReader(file_path)
     text = ""
     for page in reader.pages:
         text += page.extract_text().lower()
     return text
-
-def extract_resume_keywords(file_path):
-    text = extract_text_from_pdf(file_path)
-    return [k for k in IT_KEYWORDS if re.search(r'\\b' + re.escape(k.lower()) + r'\\b', text)]
-
 
 @app.post("/extract_keywords")
 async def extract_keywords(file: UploadFile = File(...)):
@@ -69,111 +62,74 @@ async def extract_keywords(file: UploadFile = File(...)):
 
     return {
         "keywords": keywords,
-        "extracted_text_sample": text[:500]  # return first 500 chars for inspection
+        "extracted_text_sample": text[:500]
     }
-
-
-
 
 @app.post("/scrape_jobs")
 async def scrape_jobs(payload: dict):
     keywords = payload.get("keywords")
     location = payload.get("location")
+    platforms = payload.get("platforms", ["indeed"])  # Get platforms from frontend
+    
     if not keywords or not location:
         raise HTTPException(status_code=400, detail="Keywords and location required")
-
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--blink-settings=imagesEnabled=false")
-    chrome_options.add_argument("--log-level=3")
-    chrome_options.add_argument(
-        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    )
-
-    driver = webdriver.Chrome(options=chrome_options)
-
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-    "source": """
-    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-    Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-    """
-    })
     
+    if not platforms or len(platforms) == 0:
+        raise HTTPException(status_code=400, detail="At least one platform must be selected")
+    
+    # Normalize platform names to lowercase
+    platforms = [p.lower() for p in platforms]
+    
+    print(f"\n🚀 Starting scraping from platforms: {platforms}")
+    print(f"📍 Location: {location}")
+    print(f"🔑 Keywords: {keywords}")
+    
+    # Map platform names to scraper classes
+    scraper_map = {
+        "indeed": IndeedScraper,
+        "naukri": NaukriScraper,
+        "linkedin": LinkedInScraper
+    }
+    
+    # Filter to only valid platforms that user selected
+    valid_platforms = []
+    for p in platforms:
+        if p in scraper_map:
+            valid_platforms.append(p)
+        else:
+            print(f"⚠️ Unknown platform: {p}")
+    
+    if not valid_platforms:
+        raise HTTPException(status_code=400, detail="No valid platforms selected")
+    
+    print(f"✅ Valid platforms to scrape: {valid_platforms}")
+    
+    # Scrape concurrently using ThreadPoolExecutor
+    def scrape_platform(platform_name):
+        print(f"\n[THREAD] Starting scrape for: {platform_name}")
+        try:
+            scraper_class = scraper_map[platform_name]
+            scraper = scraper_class()
+            jobs = scraper.scrape(keywords, location)
+            print(f"[THREAD] Finished scrape for {platform_name}: {len(jobs)} jobs")
+            return jobs
+        except Exception as e:
+            print(f"❌ Error scraping {platform_name}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    # Run scrapers in parallel (only for selected platforms)
+    print(f"\n🔄 Running {len(valid_platforms)} scraper(s) in parallel...")
+    with ThreadPoolExecutor(max_workers=len(valid_platforms)) as executor:
+        results = list(executor.map(scrape_platform, valid_platforms))
+    
+    # Combine all results
     all_jobs = []
-
-    try:
-        for keyword in keywords:
-            search_url = f"https://www.indeed.com/jobs?q={keyword}&l={location.replace(' ', '+')}"
-            print(f"\n🔍 Searching: {search_url}")
-            driver.get(search_url)
-            time.sleep(5)
-
-            page_source = driver.page_source
-            print(f"Page loaded, length: {len(page_source)} bytes")
-
-            # NEW SELECTORS - Updated for current Indeed structure
-            try:
-                jobs = driver.find_elements(By.CSS_SELECTOR, "a.jcs-JobTitle")
-                if len(jobs) > 0:
-                    print(f"Found {len(jobs)} jobs with 'a.jcs-JobTitle'")
-            except:
-                jobs = []
-
-            # If first selector fails, try alternative
-            if len(jobs) == 0:
-                try:
-                    jobs = driver.find_elements(By.CSS_SELECTOR, "h2.jobTitle a")
-                    print(f"Trying 'h2.jobTitle a', found {len(jobs)} jobs")
-                except:
-                    jobs = []
-
-            # If still nothing, try data attributes
-            if len(jobs) == 0:
-                try:
-                    jobs = driver.find_elements(By.CSS_SELECTOR, "a[data-jk]")
-                    print(f"Trying 'a[data-jk]', found {len(jobs)} jobs")
-                except:
-                    jobs = []
-
-            # Find company names with flexible selectors
-            try:
-                companies = driver.find_elements(By.CSS_SELECTOR, "span.companyName")
-                print(f"Found {len(companies)} companies")
-            except:
-                companies = []
-
-            # Extract job data
-            for i in range(len(jobs)):
-                try:
-                    title = jobs[i].text.strip()
-                    link = jobs[i].get_attribute("href")
-                    
-                    # Handle relative URLs
-                    if link and not link.startswith("http"):
-                        link = "https://www.indeed.com" + link
-                    
-                    company = companies[i].text.strip() if i < len(companies) else "N/A"
-                    
-                    if title and link:
-                        all_jobs.append({"title": title, "company": company, "link": link})
-                        print(f"  ✅ {title} — {company}")
-                except Exception as e:
-                    print(f"  ⚠️ Error extracting job {i}: {str(e)}")
-
-    except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-
-    finally:
-        driver.quit()
-
-    print(f"\n📊 Total jobs found: {len(all_jobs)}")
+    for jobs in results:
+        all_jobs.extend(jobs)
+    
+    print(f"\n🎉 Total jobs scraped from {len(valid_platforms)} platform(s): {len(all_jobs)}")
+    
     return {"jobs": all_jobs}
+
