@@ -25,6 +25,7 @@ origins = [
     "http://localhost:3000",
     "http://localhost:5173",
     "https://ai-job-scraper.netlify.app",
+    "https://draws-hunting-immediately-wherever.trycloudflare.com",
 ]
 
 app.add_middleware(
