@@ -1,4 +1,27 @@
-__pycache__/
-*.pyc
+# Virtual Environment
 venv/
+env/
+ENV/
+Scripts/
+Lib/
+pyvenv.cfg
 
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
