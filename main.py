@@ -33,7 +33,7 @@ origins = [
     "http://localhost:3000",
     "http://localhost:5173",
     "https://ai-job-scraper.netlify.app",
-    "https://draws-hunting-immediately-wherever.trycloudflare.com",
+    "https://delicious-demo-everywhere-edt.trycloudflare.com",
 ]
 
 app.add_middleware(
