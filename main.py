@@ -97,10 +97,20 @@ def scrape_platform_local(platform_name, keywords, location):
 # ===== LAMBDA SCRAPING =====
 def invoke_lambda_scraper(platform_name, keywords, location):
     """Call Lambda function"""
-    print(f"\n[LAMBDA] Invoking {platform_name}Scraper...")
+    
+    # Map to exact Lambda function names
+    function_map = {
+        'indeed': 'IndeedScraper',
+        'naukri': 'NaukriScraper',
+        'linkedin': 'LinkedInScraper'
+    }
+    
+    function_name = function_map.get(platform_name)
+    
+    print(f"\n[LAMBDA] Invoking {function_name}...")
     try:
         response = lambda_client.invoke(
-            FunctionName=f'{platform_name.capitalize()}Scraper',
+            FunctionName=function_name,  # ← CORRECT!
             InvocationType='RequestResponse',
             Payload=json.dumps({
                 'keywords': keywords,
@@ -116,6 +126,7 @@ def invoke_lambda_scraper(platform_name, keywords, location):
     except Exception as e:
         print(f"❌ Error invoking Lambda for {platform_name}: {str(e)}")
         return []
+
 
 @app.post("/scrape_jobs")
 async def scrape_jobs(payload: dict):
