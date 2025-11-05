@@ -4,21 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from PyPDF2 import PdfReader
 import re
 import tempfile
-import asyncio
-import json
+from concurrent.futures import ThreadPoolExecutor
 import os
 
-# Import scrapers (for local testing)
+# Import scrapers
 from scrapers import IndeedScraper, NaukriScraper, LinkedInScraper
 
 app = FastAPI()
-
-# Toggle between local and Lambda
-LOCAL_DEV = os.getenv("LOCAL_DEV", "true").lower() == "true"
-
-if not LOCAL_DEV:
-    import boto3
-    lambda_client = boto3.client('lambda', region_name='us-east-1')
 
 IT_KEYWORDS = [
     "python", "java", "c++", "javascript", "typescript", "html", "css",
@@ -33,7 +25,7 @@ origins = [
     "http://localhost:3000",
     "http://localhost:5173",
     "https://ai-job-scraper.netlify.app",
-    "https://delicious-demo-everywhere-edt.trycloudflare.com",
+    "https://draws-hunting-immediately-wherever.trycloudflare.com",
 ]
 
 app.add_middleware(
@@ -73,10 +65,9 @@ async def extract_keywords(file: UploadFile = File(...)):
         "extracted_text_sample": text[:500]
     }
 
-# ===== LOCAL SCRAPING (for testing) =====
-def scrape_platform_local(platform_name, keywords, location):
-    """Run scraper locally"""
-    print(f"\n[LOCAL] Starting scrape for: {platform_name}")
+def scrape_platform(platform_name):
+    """Run scraper"""
+    print(f"\n[SCRAPE] Starting {platform_name}")
     try:
         scraper_map = {
             "indeed": IndeedScraper,
@@ -86,7 +77,7 @@ def scrape_platform_local(platform_name, keywords, location):
         scraper_class = scraper_map[platform_name]
         scraper = scraper_class()
         jobs = scraper.scrape(keywords, location)
-        print(f"[LOCAL] Finished scrape for {platform_name}: {len(jobs)} jobs")
+        print(f"[SCRAPE] Finished {platform_name}: {len(jobs)} jobs")
         return jobs
     except Exception as e:
         print(f"❌ Error scraping {platform_name}: {str(e)}")
@@ -94,42 +85,10 @@ def scrape_platform_local(platform_name, keywords, location):
         traceback.print_exc()
         return []
 
-# ===== LAMBDA SCRAPING =====
-def invoke_lambda_scraper(platform_name, keywords, location):
-    """Call Lambda function"""
-    
-    # Map to exact Lambda function names
-    function_map = {
-        'indeed': 'IndeedScraper',
-        'naukri': 'NaukriScraper',
-        'linkedin': 'LinkedInScraper'
-    }
-    
-    function_name = function_map.get(platform_name)
-    
-    print(f"\n[LAMBDA] Invoking {function_name}...")
-    try:
-        response = lambda_client.invoke(
-            FunctionName=function_name,  # ← CORRECT!
-            InvocationType='RequestResponse',
-            Payload=json.dumps({
-                'keywords': keywords,
-                'location': location
-            })
-        )
-        
-        # Parse response
-        payload = json.loads(response['Payload'].read())
-        jobs = payload.get('jobs', [])
-        print(f"[LAMBDA] Finished {platform_name}: {len(jobs)} jobs")
-        return jobs
-    except Exception as e:
-        print(f"❌ Error invoking Lambda for {platform_name}: {str(e)}")
-        return []
-
-
 @app.post("/scrape_jobs")
 async def scrape_jobs(payload: dict):
+    global keywords, location  # Make accessible to scrape_platform
+    
     keywords = payload.get("keywords")
     location = payload.get("location")
     platforms = payload.get("platforms", ["indeed"])
@@ -145,12 +104,11 @@ async def scrape_jobs(payload: dict):
     print(f"\n🚀 Starting scraping from platforms: {platforms}")
     print(f"📍 Location: {location}")
     print(f"🔑 Keywords: {keywords}")
-    print(f"🔧 Mode: {'LOCAL' if LOCAL_DEV else 'LAMBDA'}")
     
     scraper_map = {
-        "indeed": IndeedScraper if LOCAL_DEV else None,
-        "naukri": NaukriScraper if LOCAL_DEV else None,
-        "linkedin": LinkedInScraper if LOCAL_DEV else None
+        "indeed": IndeedScraper,
+        "naukri": NaukriScraper,
+        "linkedin": LinkedInScraper
     }
     
     valid_platforms = [p for p in platforms if p in scraper_map]
@@ -159,30 +117,15 @@ async def scrape_jobs(payload: dict):
         raise HTTPException(status_code=400, detail="No valid platforms selected")
     
     print(f"✅ Valid platforms to scrape: {valid_platforms}")
+    print(f"\n🔄 Running {len(valid_platforms)} scraper(s) in parallel...")
     
-    # Run scrapers
+    # Run scrapers in parallel
     all_jobs = []
+    with ThreadPoolExecutor(max_workers=len(valid_platforms)) as executor:
+        results = list(executor.map(scrape_platform, valid_platforms))
     
-    if LOCAL_DEV:
-        # Local mode: use ThreadPoolExecutor
-        print(f"\n🔄 Running {len(valid_platforms)} scraper(s) locally in parallel...")
-        from concurrent.futures import ThreadPoolExecutor
-        
-        with ThreadPoolExecutor(max_workers=len(valid_platforms)) as executor:
-            results = list(executor.map(
-                lambda p: scrape_platform_local(p, keywords, location),
-                valid_platforms
-            ))
-        
-        for jobs in results:
-            all_jobs.extend(jobs)
-    else:
-        # Lambda mode: invoke functions
-        print(f"\n🔄 Invoking {len(valid_platforms)} Lambda function(s)...")
-        
-        for platform in valid_platforms:
-            jobs = invoke_lambda_scraper(platform, keywords, location)
-            all_jobs.extend(jobs)
+    for jobs in results:
+        all_jobs.extend(jobs)
     
     print(f"\n🎉 Total jobs scraped: {len(all_jobs)}")
     
